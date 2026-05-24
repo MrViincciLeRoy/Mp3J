@@ -1,0 +1,36 @@
+name: Download Song
+
+on:
+  workflow_dispatch:
+    inputs:
+      song:
+        description: "Song name to search and download"
+        required: true
+        default: "lofi hip hop"
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install requests json-repair
+
+      - name: Search and download
+        run: python download.py "${{ github.event.inputs.song }}"
+
+      - name: Upload downloaded file
+        uses: actions/upload-artifact@v4
+        with:
+          name: song-download
+          path: downloads/
+          if-no-files-found: warn
+          retention-days: 1
