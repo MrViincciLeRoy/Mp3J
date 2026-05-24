@@ -6,7 +6,7 @@ on:
       song:
         description: "Song name to search and download"
         required: true
-        default: "lofi hip hop"
+        default: "Blinding Lights"
 
 jobs:
   download:
@@ -15,31 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install yt-dlp and ffmpeg
-        run: |
-          pip install yt-dlp
-          sudo apt-get install -y ffmpeg -q
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
 
-      - name: Search and download first result
-        run: |
-          SONG="${{ github.event.inputs.song }}"
-          echo "Searching for: $SONG"
-          mkdir -p downloads
+      - name: Install dependencies
+        run: pip install requests pyDes
 
-          yt-dlp \
-            --default-search "ytsearch1:" \
-            --extract-audio \
-            --audio-format mp3 \
-            --audio-quality 192K \
-            --output "downloads/%(title)s.%(ext)s" \
-            --print "before_dl:%(title)s ? %(webpage_url)s" \
-            --no-playlist \
-            "$SONG"
+      - name: Search and download
+        run: python download.py "${{ github.event.inputs.song }}"
 
       - name: Show result
-        run: ls -lh downloads/
+        run: ls -lh downloads/ 2>/dev/null || echo "No files downloaded"
 
-      - name: Upload MP3
+      - name: Upload song
         uses: actions/upload-artifact@v4
         with:
           name: "${{ github.event.inputs.song }}"
