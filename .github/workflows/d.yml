@@ -15,22 +15,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
+      - name: Install yt-dlp and ffmpeg
+        run: |
+          pip install yt-dlp
+          sudo apt-get install -y ffmpeg -q
 
-      - name: Install dependencies
-        run: pip install requests json-repair
+      - name: Search and download first result
+        run: |
+          SONG="${{ github.event.inputs.song }}"
+          echo "Searching for: $SONG"
+          mkdir -p downloads
 
-      - name: Search and download
-        run: python download.py "${{ github.event.inputs.song }}"
+          yt-dlp \
+            --default-search "ytsearch1:" \
+            --extract-audio \
+            --audio-format mp3 \
+            --audio-quality 192K \
+            --output "downloads/%(title)s.%(ext)s" \
+            --print "before_dl:%(title)s ? %(webpage_url)s" \
+            --no-playlist \
+            "$SONG"
 
-      - name: Upload downloaded file
+      - name: Show result
+        run: ls -lh downloads/
+
+      - name: Upload MP3
         uses: actions/upload-artifact@v4
         with:
-          name: song-download
+          name: "${{ github.event.inputs.song }}"
           path: downloads/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 1
