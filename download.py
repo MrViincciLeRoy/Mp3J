@@ -11,6 +11,8 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 session = requests.Session()
 session.headers.update(HEADERS)
 
+JUNK_KEYWORDS = ["karaoke", "cover", "tribute", "instrumental", "remake", "version", "rendered", "melody"]
+
 
 def clean(s):
     return s.encode().decode().replace("&quot;", "'").replace("&amp;", "&").replace("&#039;", "'")
@@ -20,6 +22,36 @@ def decrypt_url(enc):
     cipher = des(b"38346591", ECB, b"\0" * 8, pad=None, padmode=PAD_PKCS5)
     dec = cipher.decrypt(base64.b64decode(enc.strip()), padmode=PAD_PKCS5).decode("utf-8")
     return dec.replace("_96.mp4", "_320.mp4")
+
+
+def tokenize(s):
+    return set(re.sub(r'[^\w\s]', '', s.lower()).split())
+
+
+def score(result, query_title, query_artists):
+    title = clean(result.get("title", "")).lower()
+    artists = clean(result.get("primary_artists", "")).lower()
+    combined = title + " " + artists
+
+    # Hard penalty for junk
+    junk_hit = any(k in title for k in JUNK_KEYWORDS)
+
+    # Token overlap with query
+    q_tokens = tokenize(query_title)
+    t_tokens = tokenize(title)
+    title_overlap = len(q_tokens & t_tokens) / max(len(q_tokens), 1)
+
+    # Artist match
+    artist_overlap = 0
+    if query_artists:
+        a_tokens = tokenize(query_artists)
+        r_tokens = tokenize(artists)
+        artist_overlap = len(a_tokens & r_tokens) / max(len(a_tokens), 1)
+
+    s = (title_overlap * 2) + (artist_overlap * 3)
+    if junk_hit:
+        s -= 5
+    return s
 
 
 def search(query):
@@ -40,7 +72,6 @@ def get_song(song_id):
 def download(title, media_url, out_dir="downloads"):
     os.makedirs(out_dir, exist_ok=True)
     safe = re.sub(r'[^\w\s\-.]', '', title).strip().replace(" ", "_")
-    # JioSaavn serves .mp4 containers with AAC — rename to .m4a which is correct
     path = os.path.join(out_dir, f"{safe}.m4a")
     resp = session.get(media_url, stream=True, timeout=60)
     resp.raise_for_status()
@@ -56,17 +87,35 @@ if __name__ == "__main__":
         print("Usage: python download.py <song name>")
         sys.exit(1)
 
+    # Split "Song - Artist" or "Artist - Song" style input
+    parts = re.split(r'\s*[-–]\s*', keyword, maxsplit=1)
+    if len(parts) == 2:
+        query_title, query_artists = parts[1].strip(), parts[0].strip()
+        # Try both orderings; use whichever feels like the song title
+        # Heuristic: artist names are usually shorter
+        if len(parts[0]) > len(parts[1]):
+            query_title, query_artists = parts[0].strip(), parts[1].strip()
+    else:
+        query_title, query_artists = keyword, ""
+
     print(f"\nSearching: {keyword}")
     results = search(keyword)
     if not results:
         print("No results.")
         sys.exit(1)
 
-    first = results[0]
-    song_id = first["id"]
-    print(f"Found: {first.get('title', '?')} — {first.get('primary_artists', '?')}")
+    # Score and rank
+    scored = sorted(results, key=lambda r: score(r, query_title, query_artists), reverse=True)
 
-    print("Fetching song details...")
+    print(f"\nTop candidates:")
+    for i, r in enumerate(scored[:5]):
+        s = score(r, query_title, query_artists)
+        print(f"  [{i+1}] {clean(r.get('title','?'))} — {clean(r.get('primary_artists','?'))}  (score: {s:.2f})")
+
+    best = scored[0]
+    song_id = best["id"]
+    print(f"\nPicking: {clean(best.get('title', '?'))} — {clean(best.get('primary_artists', '?'))}")
+
     song = get_song(song_id)
     if not song:
         print("Could not fetch song details.")
@@ -82,9 +131,8 @@ if __name__ == "__main__":
     if song.get("320kbps") != "true":
         media_url = media_url.replace("_320.mp4", "_160.mp4")
 
-    print(f"Title   : {title}")
+    print(f"\nTitle   : {title}")
     print(f"Quality : {'320kbps' if song.get('320kbps') == 'true' else '160kbps'}")
-    print(f"URL     : {media_url}")
 
     path, size = download(title, media_url)
     print(f"Saved   : {path} ({size:.2f} MB)")
